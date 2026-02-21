@@ -20,7 +20,6 @@
         .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .input-dark { background-color: #0f172a; border: 1px solid #334155; color: white; transition: all 0.3s; }
         .input-dark:focus { border-color: #6366f1; outline: none; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
-        /* Honeypot gizleme */
         .hp-field { opacity: 0; position: absolute; top: -9999px; left: -9999px; }
     </style>
 </head>
@@ -60,6 +59,15 @@
         <form id="transactionForm" class="space-y-5" onsubmit="event.preventDefault(); saveTransaction();">
             
             <input type="text" id="hp_website" class="hp-field" tabindex="-1" autocomplete="off">
+
+            <div class="glass-panel p-4 rounded-xl space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">İşlemi Yapan (Kullanıcı) *</label>
+                    <select id="frmUser" required class="w-full input-dark rounded-lg p-2.5">
+                        <option value="">Kullanıcı Seçin...</option>
+                    </select>
+                </div>
+            </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
@@ -147,10 +155,7 @@
     </div>
 
     <script>
-        // C#'taki SyncManager içerisindeki AES_KEY ile tamamen aynı yapıldı
         const AES_KEY = CryptoJS.enc.Utf8.parse("NochiProject_Secret_Key_2026_XYZ");
-        
-        // Turso Settings
         const TURSO_URL = "https://nkt-db-nochi.aws-eu-west-1.turso.io/v2/pipeline";
         const TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzE2ODAwMTcsImlkIjoiN2QwMWNjZjEtNmVhZS00ZTQ1LTg5NjMtMmFhNjMyY2IxMzI5IiwicmlkIjoiZWRiNzU5ODQtYzIxOS00M2E2LWIwZDItZjgwOTk0ZTdiZWM5In0.gH30D2mgBJ4wk7Wj6a1h1xv9uL5FHnNX3ZFGH1etAlha0j3fmfhL1WsawoyoDjAFyjy1wAapFTSyubMH7AKFBA";
         
@@ -174,7 +179,6 @@
             }
         };
 
-        // --- KAMERA VE QR KOD İŞLEMLERİ ---
         function startScanner() {
             document.getElementById('reader').classList.remove('hidden');
             document.getElementById('btnStopScan').classList.remove('hidden');
@@ -189,10 +193,8 @@
                 stopScanner();
                 saveSetup(); 
             }, 
-            (errorMessage) => {
-                // Hataları yoksay
-            }).catch((err) => {
-                Swal.fire('Kamera Hatası', 'Kameraya erişilemedi. Lütfen tarayıcı izinlerini kontrol edin.', 'error');
+            (errorMessage) => { }).catch((err) => {
+                Swal.fire('Kamera Hatası', 'Kameraya erişilemedi.', 'error');
                 stopScanner();
             });
         }
@@ -203,14 +205,13 @@
                     document.getElementById('reader').classList.add('hidden');
                     document.getElementById('btnStopScan').classList.add('hidden');
                     document.getElementById('btnSaveSetup').classList.remove('hidden');
-                }).catch(err => console.log("Kamera durdurulurken hata:", err));
+                }).catch(err => console.log("Hata:", err));
             }
         }
 
-        // --- EŞLEŞTİRME VE DB İŞLEMLERİ ---
         function saveSetup() {
             const hash = document.getElementById('setupHash').value.trim();
-            if (hash.length < 10) return Swal.fire('Hata', 'Lütfen geçerli bir kod girin veya okutun.', 'warning');
+            if (hash.length < 10) return Swal.fire('Hata', 'Lütfen geçerli bir kod girin.', 'warning');
             localStorage.setItem('nkt_tenant_hash', hash.toLowerCase());
             location.reload();
         }
@@ -218,13 +219,12 @@
         function clearSetup() {
             Swal.fire({
                 title: 'Emin misiniz?',
-                text: "Bu cihazın bilgisayar ile bağlantısı kesilecek!",
+                text: "Bağlantı kesilecek!",
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#d33',
                 cancelButtonColor: '#3085d6',
-                confirmButtonText: 'Evet, Sil!',
-                cancelButtonText: 'İptal'
+                confirmButtonText: 'Evet, Sil!'
             }).then((result) => {
                 if (result.isConfirmed) {
                     localStorage.removeItem('nkt_tenant_hash');
@@ -248,11 +248,9 @@
             return await response.json();
         }
 
-        // C#'tan gelen JSON verisinin şifresini çözen metod
         function decryptData(base64Str) {
             try {
                 var rawData = CryptoJS.enc.Base64.parse(base64Str);
-                // C# ilk 16 byte'ı IV olarak kaydetti. (16 byte = 4 word)
                 var iv = CryptoJS.lib.WordArray.create(rawData.words.slice(0, 4));
                 var ciphertext = CryptoJS.lib.WordArray.create(rawData.words.slice(4));
                 
@@ -263,7 +261,6 @@
                 );
                 return decrypted.toString(CryptoJS.enc.Utf8);
             } catch (e) {
-                console.error("Şifre çözme hatası:", e);
                 return null;
             }
         }
@@ -281,7 +278,6 @@
 
         async function fetchDefinitions() {
             try {
-                // Name ve CurrencyCode sütunları yok, onun yerine C#'tan yazılan EncryptedJson'u çekiyoruz
                 const res = await runTursoQuery(`SELECT Type, DataId, EncryptedJson FROM Def_${tenantHash}`);
                 
                 if (!res.results || !res.results[0].response.result) {
@@ -293,10 +289,12 @@
                 const safeSel = document.getElementById('frmSafe');
                 const catSel = document.getElementById('frmCat');
                 const cariSel = document.getElementById('frmCari');
+                const userSel = document.getElementById('frmUser');
                 
                 safeSel.innerHTML = '<option value="">Seçiniz</option>';
                 catSel.innerHTML = '<option value="">Seçiniz</option>';
                 cariSel.innerHTML = '<option value="">Cari Yok</option>';
+                userSel.innerHTML = '<option value="">Kullanıcı Seçin...</option>';
 
                 allCategories = [];
                 allSafes = [];
@@ -306,9 +304,8 @@
                     const id = r[1].value;
                     const encryptedJson = r[2].value;
 
-                    // Şifreyi çözüp JSON objesine dönüştürüyoruz
                     const decryptedStr = decryptData(encryptedJson);
-                    if (!decryptedStr) return; // Çözülemezse atla
+                    if (!decryptedStr) return; 
 
                     const dataObj = JSON.parse(decryptedStr);
                     const name = dataObj.Name;
@@ -321,12 +318,29 @@
                         allCategories.push({id, name, type: type.replace('CAT_','')});
                     } else if(type === 'CARI') {
                         cariSel.innerHTML += `<option value="${id}">${name}</option>`;
+                    } else if(type === 'USER') {
+                        userSel.innerHTML += `<option value="${dataObj.Username}">${dataObj.FullName}</option>`;
                     }
                 });
+
+                if (userSel.options.length <= 1) {
+                    Swal.fire('Erişim Reddedildi', 'Sisteme mobil işlem girme yetkiniz bulunmamaktadır.', 'warning').then(() => {
+                        localStorage.removeItem('nkt_tenant_hash'); location.reload();
+                    });
+                }
+
                 filterCategories();
             } catch (error) {
                 console.error(error);
-                Swal.fire('Bağlantı Hatası', 'Bulut ile bağlantı kurulamadı veya eşleştirme kodu hatalı. Masaüstü uygulamasında Mobil Onay kısmından "Yenile / Senkronize Et" butonuna basıp ardından eşleşmeyi yenileyin.', 'error');
+                // Bağlantı koparma koruması
+                Swal.fire({
+                    title: 'Bağlantı Hatası',
+                    text: 'Bulut bağlantısı kurulamadı veya kod geçersiz. Güvenlik nedeniyle eşleşme sıfırlanıyor...',
+                    icon: 'error'
+                }).then(() => {
+                    localStorage.removeItem('nkt_tenant_hash');
+                    location.reload();
+                });
             }
         }
 
@@ -399,6 +413,7 @@
                 }
 
                 const payload = {
+                    CreatedBy: document.getElementById('frmUser').value, // Kullanıcı Ataması Eklendi
                     Date: document.getElementById('frmDate').value,
                     Time: document.getElementById('frmTime').value + ":00",
                     CariId: document.getElementById('frmCari').value ? parseInt(document.getElementById('frmCari').value) : null,
@@ -431,7 +446,7 @@
                 });
 
             } catch (error) {
-                Swal.fire('Hata', 'Gönderim başarısız. Lütfen internet bağlantınızı kontrol edin.', 'error');
+                Swal.fire('Hata', 'Gönderim başarısız. İnternet bağlantınızı kontrol edin.', 'error');
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = 'İşlemi Gönder';
