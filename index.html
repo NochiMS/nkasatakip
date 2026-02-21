@@ -179,6 +179,13 @@
             }
         };
 
+        function forceLogout() {
+            localStorage.removeItem('nkt_tenant_hash');
+            localStorage.removeItem('nkt_username');
+            localStorage.removeItem('nkt_user_hash');
+            location.reload();
+        }
+
         function startScanner() {
             document.getElementById('reader').classList.remove('hidden');
             document.getElementById('btnStopScan').classList.remove('hidden');
@@ -234,10 +241,7 @@
                 confirmButtonText: 'Evet, Çıkış Yap'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    localStorage.removeItem('nkt_tenant_hash');
-                    localStorage.removeItem('nkt_username');
-                    localStorage.removeItem('nkt_user_hash');
-                    location.reload();
+                    forceLogout();
                 }
             });
         }
@@ -285,6 +289,22 @@
             return CryptoJS.enc.Base64.stringify(combined);
         }
 
+        // Sunucudan canlı yetki kontrolü yapan fonksiyon
+        async function checkAuthStatus() {
+            try {
+                const res = await runTursoQuery(`SELECT EncryptedJson FROM Def_${tenantHash} WHERE Type='AUTH'`);
+                if (res.results && res.results[0].response.result.rows.length > 0) {
+                    const encJson = res.results[0].response.result.rows[0][0].value;
+                    const decStr = decryptData(encJson);
+                    if (decStr) {
+                        const dataObj = JSON.parse(decStr);
+                        return (dataObj.Hashes || []).includes(userHash);
+                    }
+                }
+                return false;
+            } catch { return false; }
+        }
+
         async function fetchDefinitions() {
             try {
                 const res = await runTursoQuery(`SELECT Type, DataId, EncryptedJson FROM Def_${tenantHash}`);
@@ -305,6 +325,7 @@
 
                 allCategories = [];
                 allSafes = [];
+                let isAuthValid = false;
 
                 rows.forEach(r => {
                     const type = r[0].value;
@@ -315,6 +336,12 @@
                     if (!decryptedStr) return; 
 
                     const dataObj = JSON.parse(decryptedStr);
+                    
+                    if (type === 'AUTH') {
+                        if ((dataObj.Hashes || []).includes(userHash)) isAuthValid = true;
+                        return;
+                    }
+
                     const name = dataObj.Name;
                     const curr = dataObj.CurrencyCode || '';
 
@@ -328,6 +355,14 @@
                     }
                 });
 
+                // Ekran açıldığında güvenlik kontrolü
+                if (!isAuthValid) {
+                    Swal.fire('Erişim Engellendi', 'Bu cihazın yetkisi merkezden iptal edilmiştir.', 'error').then(() => {
+                        forceLogout();
+                    });
+                    return;
+                }
+
                 filterCategories();
             } catch (error) {
                 console.error(error);
@@ -335,12 +370,7 @@
                     title: 'Bağlantı Hatası',
                     text: 'Eşleştirme kodunuz sistemden iptal edilmiş veya bağlantı yok. Yeniden eşleşme yapmalısınız.',
                     icon: 'error'
-                }).then(() => {
-                    localStorage.removeItem('nkt_tenant_hash');
-                    localStorage.removeItem('nkt_username');
-                    localStorage.removeItem('nkt_user_hash');
-                    location.reload();
-                });
+                }).then(() => { forceLogout(); });
             }
         }
 
@@ -386,6 +416,17 @@
 
             const btn = document.getElementById('btnSave');
             btn.disabled = true;
+            btn.innerHTML = 'Güvenlik Kontrolü...';
+
+            // GÜVENLİK ADIMI: İşlemi göndermeden hemen önce buluttan yetkiyi tekrar doğrula!
+            const isAuthorized = await checkAuthStatus();
+            if (!isAuthorized) {
+                Swal.fire('Erişim Engellendi', 'Cihaz yetkiniz sistem tarafından iptal edilmiş. Kayıt gönderemezsiniz.', 'error').then(() => {
+                    forceLogout();
+                });
+                return;
+            }
+
             btn.innerHTML = 'Gönderiliyor...';
 
             try {
