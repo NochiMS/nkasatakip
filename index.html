@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="icon" href="logo.png" type="image/png">
+    <title>NOCHI Mobil Veri Girişi</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { background-color: #141423; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .glass-panel { background: rgba(30, 30, 45, 0.95); border-radius: 1rem; border: 1px solid rgba(80, 80, 100, 0.5); }
+        .input-field { background-color: #2D2D41; color: white; border: 1px solid #4B4B64; border-radius: 0.5rem; padding: 0.75rem; width: 100%; outline: none; }
+        .input-field:focus { border-color: #7B61FF; }
+        .btn-primary { background-color: #7B61FF; color: white; border-radius: 0.5rem; padding: 0.75rem; width: 100%; font-weight: bold; }
+    </style>
+</head>
+<body class="p-4 flex items-center justify-center min-h-screen">
+
+    <div id="setupView" class="w-full max-w-md glass-panel p-6 hidden">
+        <div class="flex justify-center mb-4"><img src="logo.png" alt="Logo" class="h-16 w-16" onerror="this.style.display='none'"></div>
+        <h2 class="text-xl font-bold text-center mb-6">Cihaz Eşleştirme</h2>
+        <input type="text" id="txtSetupKey" class="input-field mb-4" placeholder="Kurulum Kodunu Yapıştırın (Base64)">
+        <button onclick="saveSetup()" class="btn-primary">Eşleştir</button>
+    </div>
+
+    <div id="appView" class="w-full max-w-md glass-panel p-6 hidden">
+        <h2 class="text-xl font-bold mb-4 text-center">Yeni İşlem Ekle</h2>
+        
+        <div class="space-y-4">
+            <select id="cmbType" class="input-field"><option value="Gelir">GELİR</option><option value="Gider">GİDER</option></select>
+            <select id="cmbCari" class="input-field"><option value="">Cari Seçin</option></select>
+            <select id="cmbKasa" class="input-field" onchange="checkCurrency()"><option value="">Kasa Seçin</option></select>
+            <select id="cmbKategori" class="input-field"><option value="">Kategori Seçin</option></select>
+            
+            <div id="divForeign" class="hidden grid grid-cols-2 gap-2">
+                <div><label class="text-xs text-gray-400">Döviz Tutarı</label><input type="number" id="txtForeignAmt" class="input-field" value="0"></div>
+                <div><label class="text-xs text-gray-400">Kur</label><input type="number" id="txtRate" class="input-field" value="1"></div>
+            </div>
+
+            <div><label class="text-xs text-gray-400">Tutar (TL)</label><input type="number" id="txtAmount" class="input-field" placeholder="0.00"></div>
+            
+            <div class="grid grid-cols-2 gap-2">
+                <div><label class="text-xs text-gray-400">KDV Oranı (%)</label><input type="number" id="txtKdv" class="input-field" value="0"></div>
+                <div class="flex items-center mt-5"><input type="checkbox" id="chkKdvDahil" checked class="mr-2"><label class="text-sm">KDV Dahil</label></div>
+            </div>
+
+            <input type="text" id="txtDesc" class="input-field" placeholder="Açıklama">
+            
+            <input type="text" id="hp_field" class="hidden-hp" style="opacity:0; position:absolute; top:-9999px; z-index:-1;" tabindex="-1" autocomplete="off">
+
+            <button onclick="saveTransaction()" class="btn-primary mt-4" id="btnSave">Kaydet ve Gönder</button>
+            <button onclick="fetchDefinitions()" class="w-full text-sm text-gray-400 mt-2 p-2 border border-gray-600 rounded">Listeleri Güncelle</button>
+        </div>
+    </div>
+
+    <script>
+        // C# DbBase içerisindeki sabit anahtar
+        const SECRET_KEY = "NochiProject_Secret_Key_2026!!";
+        let aesKey, aesIV, config;
+
+        window.onload = () => {
+            aesKey = CryptoJS.SHA256(SECRET_KEY);
+            aesIV = CryptoJS.MD5(SECRET_KEY);
+            
+            const savedConf = localStorage.getItem("NKT_Config");
+            if (savedConf) { config = JSON.parse(savedConf); showView('appView'); fetchDefinitions(); }
+            else { showView('setupView'); }
+        };
+
+        function showView(id) {
+            document.getElementById('setupView').classList.add('hidden');
+            document.getElementById('appView').classList.add('hidden');
+            document.getElementById(id).classList.remove('hidden');
+        }
+
+        function encryptData(text) {
+            const encrypted = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(text), aesKey, { iv: aesIV, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+            return encrypted.toString();
+        }
+
+        function decryptData(cipherText) {
+            const decrypted = CryptoJS.AES.decrypt(cipherText, aesKey, { iv: aesIV, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+            return decrypted.toString(CryptoJS.enc.Utf8);
+        }
+
+        function saveSetup() {
+            try {
+                const b64 = document.getElementById('txtSetupKey').value;
+                const jsonStr = decodeURIComponent(escape(window.atob(b64)));
+                config = JSON.parse(jsonStr); // Beklenen Format: { url: "https...", token: "...", hash: "..." }
+                localStorage.setItem("NKT_Config", JSON.stringify(config));
+                showView('appView'); fetchDefinitions();
+            } catch(e) { alert("Geçersiz Kurulum Kodu!"); }
+        }
+
+        async function executeTurso(sql, args = []) {
+            const response = await fetch(`${config.url}/v2/pipeline`, {
+                method: "POST", headers: { "Authorization": `Bearer ${config.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ requests: [ { type: "execute", stmt: { sql: sql, args: args } }, { type: "close" } ] })
+            });
+            const data = await response.json();
+            if(data.results[0].type === "error") throw new Error(data.results[0].error.message);
+            return data.results[0].response.result;
+        }
+
+        async function fetchDefinitions() {
+            try {
+                const res = await executeTurso(`SELECT DefType, JsonData FROM Def_${config.hash}`);
+                res.rows.forEach(row => {
+                    const type = row[0].value;
+                    const plainJson = decryptData(row[1].value);
+                    const list = JSON.parse(plainJson);
+                    populateCombo(type === "Cariler" ? 'cmbCari' : (type === "Kasalar" ? 'cmbKasa' : 'cmbKategori'), list);
+                });
+            } catch(e) { console.log("Listeler çekilemedi: ", e); }
+        }
+
+        function populateCombo(id, list) {
+            const sel = document.getElementById(id);
+            sel.innerHTML = `<option value="">${id.replace('cmb','')} Seçin</option>`;
+            list.forEach(i => {
+                const opt = document.createElement("option");
+                opt.value = i.Id;
+                opt.text = i.Name + (i.CurrencyCode ? ` (${i.CurrencyCode})` : '');
+                opt.dataset.currency = i.CurrencyCode || 'TRY';
+                sel.appendChild(opt);
+            });
+        }
+
+        function checkCurrency() {
+            const sel = document.getElementById('cmbKasa');
+            if(sel.selectedIndex <= 0) return;
+            const currency = sel.options[sel.selectedIndex].dataset.currency;
+            document.getElementById('divForeign').style.display = (currency === 'TRY') ? 'none' : 'grid';
+        }
+
+        async function saveTransaction() {
+            // Honeypot Kontrolü
+            if(document.getElementById('hp_field').value !== "") { console.warn("Bot detected."); return; }
+
+            const btn = document.getElementById('btnSave');
+            
+            try {
+                btn.innerText = "Bekleyin..."; btn.disabled = true;
+
+                // Kota Kontrolü
+                const countRes = await executeTurso(`SELECT COUNT(*) FROM Inbox_${config.hash}`);
+                if (parseInt(countRes.rows[0][0].value) >= 50) {
+                    alert("Onay bekleyen çok fazla işlem var. Lütfen masaüstü uygulamasından işlemleri onaylayın.");
+                    return;
+                }
+
+                const selKasa = document.getElementById('cmbKasa');
+                const dto = {
+                    Date: new Date().toISOString(),
+                    CariId: parseInt(document.getElementById('cmbCari').value) || 0,
+                    SafeId: parseInt(selKasa.value) || 0,
+                    CategoryId: parseInt(document.getElementById('cmbKategori').value) || 0,
+                    CurrencyId: 0, // Masaüstünde ID'ye çevrilecek
+                    Type: document.getElementById('cmbType').value,
+                    Amount: parseFloat(document.getElementById('txtAmount').value) || 0,
+                    ForeignAmount: parseFloat(document.getElementById('txtForeignAmt').value) || 0,
+                    Rate: parseFloat(document.getElementById('txtRate').value) || 1,
+                    KdvRate: parseFloat(document.getElementById('txtKdv').value) || 0,
+                    IsKdvIncluded: document.getElementById('chkKdvDahil').checked,
+                    Description: document.getElementById('txtDesc').value,
+                    CariName: document.getElementById('cmbCari').options[document.getElementById('cmbCari').selectedIndex].text,
+                    SafeName: selKasa.options[selKasa.selectedIndex].text,
+                    CategoryName: document.getElementById('cmbKategori').options[document.getElementById('cmbKategori').selectedIndex].text,
+                    CurrencyCode: selKasa.options[selKasa.selectedIndex].dataset.currency || "TRY"
+                };
+
+                const encryptedJson = encryptData(JSON.stringify(dto));
+                await executeTurso(`INSERT INTO Inbox_${config.hash} (EncryptedData) VALUES (?)`, [{ type: "text", value: encryptedJson }]);
+                
+                alert("İşlem başarıyla gönderildi!");
+                document.getElementById('txtAmount').value = ""; document.getElementById('txtDesc').value = "";
+            } 
+            catch(e) { alert("Hata oluştu: " + e.message); }
+            finally { btn.innerText = "Kaydet ve Gönder"; btn.disabled = false; }
+        }
+    </script>
+</body>
+</html>
