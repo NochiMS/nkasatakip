@@ -28,14 +28,14 @@
     <div id="setupScreen" class="max-w-md mx-auto glass-panel p-6 rounded-2xl shadow-xl mt-10 hidden">
         <div class="text-center mb-6">
             <h2 class="text-2xl font-bold text-white">Cihaz Eşleştirme</h2>
-            <p class="text-gray-400 text-sm mt-1">Bilgisayar ekranındaki QR kodu okutun veya Hash kodunu elle girin.</p>
+            <p class="text-gray-400 text-sm mt-1">Bilgisayar ekranındaki özel QR kodunuzu okutun veya Hash kodunu elle girin.</p>
         </div>
         
         <div id="reader" class="w-full mb-4 rounded-xl overflow-hidden hidden border border-indigo-500/30"></div>
 
         <div class="space-y-4">
             <div>
-                <label class="block text-sm text-gray-400 mb-1">Eşleştirme Kodu (Tenant Hash)</label>
+                <label class="block text-sm text-gray-400 mb-1">Eşleştirme Kodu</label>
                 <div class="flex space-x-2">
                     <input type="text" id="setupHash" class="w-full input-dark rounded-lg p-3" placeholder="QR Okut veya Yapıştır">
                     
@@ -52,22 +52,16 @@
 
     <div id="appScreen" class="max-w-md mx-auto hidden">
         <div class="flex items-center justify-between mb-6">
-            <h1 class="text-xl font-bold text-white">Yeni İşlem Ekle</h1>
-            <button onclick="clearSetup()" class="text-xs text-red-400 border border-red-400 px-2 py-1 rounded hover:bg-red-400 hover:text-white transition">Eşleşmeyi Sil</button>
+            <div>
+                <h1 class="text-xl font-bold text-white">Yeni İşlem Ekle</h1>
+                <p id="lblActiveUser" class="text-sm text-emerald-400 font-bold mt-1"></p>
+            </div>
+            <button onclick="clearSetup()" class="text-xs text-red-400 border border-red-400 px-2 py-1 rounded hover:bg-red-400 hover:text-white transition">Çıkış Yap</button>
         </div>
 
         <form id="transactionForm" class="space-y-5" onsubmit="event.preventDefault(); saveTransaction();">
             
             <input type="text" id="hp_website" class="hp-field" tabindex="-1" autocomplete="off">
-
-            <div class="glass-panel p-4 rounded-xl space-y-4">
-                <div>
-                    <label class="block text-sm text-gray-400 mb-1">İşlemi Yapan (Kullanıcı) *</label>
-                    <select id="frmUser" required class="w-full input-dark rounded-lg p-2.5">
-                        <option value="">Kullanıcı Seçin...</option>
-                    </select>
-                </div>
-            </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
@@ -160,6 +154,8 @@
         const TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzE2ODAwMTcsImlkIjoiN2QwMWNjZjEtNmVhZS00ZTQ1LTg5NjMtMmFhNjMyY2IxMzI5IiwicmlkIjoiZWRiNzU5ODQtYzIxOS00M2E2LWIwZDItZjgwOTk0ZTdiZWM5In0.gH30D2mgBJ4wk7Wj6a1h1xv9uL5FHnNX3ZFGH1etAlha0j3fmfhL1WsawoyoDjAFyjy1wAapFTSyubMH7AKFBA";
         
         let tenantHash = "";
+        let username = "";
+        let userHash = "";
         let allCategories = [];
         let allSafes = [];
         let html5QrCode;
@@ -170,9 +166,13 @@
             document.getElementById('frmTime').value = now.toTimeString().substring(0,5);
 
             tenantHash = localStorage.getItem('nkt_tenant_hash');
-            if (tenantHash) {
+            username = localStorage.getItem('nkt_username');
+            userHash = localStorage.getItem('nkt_user_hash');
+
+            if (tenantHash && username && userHash) {
                 document.getElementById('setupScreen').classList.add('hidden');
                 document.getElementById('appScreen').classList.remove('hidden');
+                document.getElementById('lblActiveUser').innerText = "Kullanıcı: " + username;
                 fetchDefinitions();
             } else {
                 document.getElementById('setupScreen').classList.remove('hidden');
@@ -210,24 +210,33 @@
         }
 
         function saveSetup() {
-            const hash = document.getElementById('setupHash').value.trim();
-            if (hash.length < 10) return Swal.fire('Hata', 'Lütfen geçerli bir kod girin.', 'warning');
-            localStorage.setItem('nkt_tenant_hash', hash.toLowerCase());
-            location.reload();
+            const hashInput = document.getElementById('setupHash').value.trim();
+            const parts = hashInput.split('|');
+            
+            if (parts.length === 3) {
+                localStorage.setItem('nkt_tenant_hash', parts[0]);
+                localStorage.setItem('nkt_username', parts[1]);
+                localStorage.setItem('nkt_user_hash', parts[2]);
+                location.reload();
+            } else {
+                Swal.fire('Hata', 'Geçersiz Eşleştirme Kodu.', 'warning');
+            }
         }
 
         function clearSetup() {
             Swal.fire({
-                title: 'Emin misiniz?',
-                text: "Bağlantı kesilecek!",
+                title: 'Çıkış Yapılsın mı?',
+                text: "Yeniden girmek için tekrar QR kod okutmanız gerekir.",
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#d33',
                 cancelButtonColor: '#3085d6',
-                confirmButtonText: 'Evet, Sil!'
+                confirmButtonText: 'Evet, Çıkış Yap'
             }).then((result) => {
                 if (result.isConfirmed) {
                     localStorage.removeItem('nkt_tenant_hash');
+                    localStorage.removeItem('nkt_username');
+                    localStorage.removeItem('nkt_user_hash');
                     location.reload();
                 }
             });
@@ -289,12 +298,10 @@
                 const safeSel = document.getElementById('frmSafe');
                 const catSel = document.getElementById('frmCat');
                 const cariSel = document.getElementById('frmCari');
-                const userSel = document.getElementById('frmUser');
                 
                 safeSel.innerHTML = '<option value="">Seçiniz</option>';
                 catSel.innerHTML = '<option value="">Seçiniz</option>';
                 cariSel.innerHTML = '<option value="">Cari Yok</option>';
-                userSel.innerHTML = '<option value="">Kullanıcı Seçin...</option>';
 
                 allCategories = [];
                 allSafes = [];
@@ -318,27 +325,20 @@
                         allCategories.push({id, name, type: type.replace('CAT_','')});
                     } else if(type === 'CARI') {
                         cariSel.innerHTML += `<option value="${id}">${name}</option>`;
-                    } else if(type === 'USER') {
-                        userSel.innerHTML += `<option value="${dataObj.Username}">${dataObj.FullName}</option>`;
                     }
                 });
-
-                if (userSel.options.length <= 1) {
-                    Swal.fire('Erişim Reddedildi', 'Sisteme mobil işlem girme yetkiniz bulunmamaktadır.', 'warning').then(() => {
-                        localStorage.removeItem('nkt_tenant_hash'); location.reload();
-                    });
-                }
 
                 filterCategories();
             } catch (error) {
                 console.error(error);
-                // Bağlantı koparma koruması
                 Swal.fire({
                     title: 'Bağlantı Hatası',
-                    text: 'Bulut bağlantısı kurulamadı veya kod geçersiz. Güvenlik nedeniyle eşleşme sıfırlanıyor...',
+                    text: 'Eşleştirme kodunuz sistemden iptal edilmiş veya bağlantı yok. Yeniden eşleşme yapmalısınız.',
                     icon: 'error'
                 }).then(() => {
                     localStorage.removeItem('nkt_tenant_hash');
+                    localStorage.removeItem('nkt_username');
+                    localStorage.removeItem('nkt_user_hash');
                     location.reload();
                 });
             }
@@ -413,7 +413,8 @@
                 }
 
                 const payload = {
-                    CreatedBy: document.getElementById('frmUser').value, // Kullanıcı Ataması Eklendi
+                    CreatedBy: username, 
+                    UserHash: userHash, 
                     Date: document.getElementById('frmDate').value,
                     Time: document.getElementById('frmTime').value + ":00",
                     CariId: document.getElementById('frmCari').value ? parseInt(document.getElementById('frmCari').value) : null,
