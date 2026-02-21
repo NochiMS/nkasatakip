@@ -20,6 +20,7 @@
         .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .input-dark { background-color: #0f172a; border: 1px solid #334155; color: white; transition: all 0.3s; }
         .input-dark:focus { border-color: #6366f1; outline: none; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+        /* Honeypot gizleme */
         .hp-field { opacity: 0; position: absolute; top: -9999px; left: -9999px; }
     </style>
 </head>
@@ -35,14 +36,16 @@
 
         <div class="space-y-4">
             <div>
-                <label class="block text-sm text-gray-400 mb-1">Eşleştirme Kodu</label>
+                <label class="block text-sm text-gray-400 mb-1">Eşleştirme Kodu (Tenant Hash)</label>
                 <div class="flex space-x-2">
                     <input type="text" id="setupHash" class="w-full input-dark rounded-lg p-3" placeholder="QR Okut veya Yapıştır">
+                    
                     <button onclick="startScanner()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 rounded-lg transition-colors flex items-center justify-center shadow-lg" title="QR Kodu Tara">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                     </button>
                 </div>
             </div>
+            
             <button id="btnSaveSetup" onclick="saveSetup()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition-colors">Eşleşmeyi Tamamla</button>
             <button id="btnStopScan" onclick="stopScanner()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors hidden">Kamerayı Kapat</button>
         </div>
@@ -144,14 +147,16 @@
     </div>
 
     <script>
-        // C# Şifrelemesiyle 1:1 Uyumluluk (Tam 32 Bytes)
+        // C#'taki SyncManager içerisindeki AES_KEY ile tamamen aynı yapıldı
         const AES_KEY = CryptoJS.enc.Utf8.parse("NochiProject_Secret_Key_2026_XYZ");
         
+        // Turso Settings
         const TURSO_URL = "https://nkt-db-nochi.aws-eu-west-1.turso.io/v2/pipeline";
         const TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzE2ODAwMTcsImlkIjoiN2QwMWNjZjEtNmVhZS00ZTQ1LTg5NjMtMmFhNjMyY2IxMzI5IiwicmlkIjoiZWRiNzU5ODQtYzIxOS00M2E2LWIwZDItZjgwOTk0ZTdiZWM5In0.gH30D2mgBJ4wk7Wj6a1h1xv9uL5FHnNX3ZFGH1etAlha0j3fmfhL1WsawoyoDjAFyjy1wAapFTSyubMH7AKFBA";
         
         let tenantHash = "";
         let allCategories = [];
+        let allSafes = [];
         let html5QrCode;
 
         window.onload = () => {
@@ -184,8 +189,10 @@
                 stopScanner();
                 saveSetup(); 
             }, 
-            (errorMessage) => {}).catch((err) => {
-                Swal.fire('Kamera Hatası', 'Kameraya erişilemedi.', 'error');
+            (errorMessage) => {
+                // Hataları yoksay
+            }).catch((err) => {
+                Swal.fire('Kamera Hatası', 'Kameraya erişilemedi. Lütfen tarayıcı izinlerini kontrol edin.', 'error');
                 stopScanner();
             });
         }
@@ -196,13 +203,14 @@
                     document.getElementById('reader').classList.add('hidden');
                     document.getElementById('btnStopScan').classList.add('hidden');
                     document.getElementById('btnSaveSetup').classList.remove('hidden');
-                }).catch(err => console.log("Hata:", err));
+                }).catch(err => console.log("Kamera durdurulurken hata:", err));
             }
         }
 
+        // --- EŞLEŞTİRME VE DB İŞLEMLERİ ---
         function saveSetup() {
             const hash = document.getElementById('setupHash').value.trim();
-            if (hash.length < 10) return Swal.fire('Hata', 'Lütfen geçerli bir kod girin.', 'warning');
+            if (hash.length < 10) return Swal.fire('Hata', 'Lütfen geçerli bir kod girin veya okutun.', 'warning');
             localStorage.setItem('nkt_tenant_hash', hash.toLowerCase());
             location.reload();
         }
@@ -210,7 +218,7 @@
         function clearSetup() {
             Swal.fire({
                 title: 'Emin misiniz?',
-                text: "Bu cihazın bağlantısı kesilecek!",
+                text: "Bu cihazın bilgisayar ile bağlantısı kesilecek!",
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#d33',
@@ -226,7 +234,12 @@
         }
 
         async function runTursoQuery(sql, args = []) {
-            const payload = { requests: [ { type: "execute", stmt: { sql: sql, args: args } }, { type: "close" } ] };
+            const payload = {
+                requests: [
+                    { type: "execute", stmt: { sql: sql, args: args } },
+                    { type: "close" }
+                ]
+            };
             const response = await fetch(TURSO_URL, {
                 method: "POST",
                 headers: { "Authorization": "Bearer " + TURSO_TOKEN, "Content-Type": "application/json" },
@@ -235,25 +248,26 @@
             return await response.json();
         }
 
-        // --- C# Tarafından Gelen Veriyi Çözümleyen Fonksiyon ---
-        function decryptData(cipherText) {
+        // C#'tan gelen JSON verisinin şifresini çözen metod
+        function decryptData(base64Str) {
             try {
-                const cipherBytes = CryptoJS.enc.Base64.parse(cipherText);
-                const iv = CryptoJS.lib.WordArray.create(cipherBytes.words.slice(0, 4), 16);
-                const cipherContent = CryptoJS.lib.WordArray.create(cipherBytes.words.slice(4), cipherBytes.sigBytes - 16);
+                var rawData = CryptoJS.enc.Base64.parse(base64Str);
+                // C# ilk 16 byte'ı IV olarak kaydetti. (16 byte = 4 word)
+                var iv = CryptoJS.lib.WordArray.create(rawData.words.slice(0, 4));
+                var ciphertext = CryptoJS.lib.WordArray.create(rawData.words.slice(4));
                 
-                const decrypted = CryptoJS.AES.decrypt({ ciphertext: cipherContent }, AES_KEY, {
-                    iv: iv,
-                    mode: CryptoJS.mode.CBC,
-                    padding: CryptoJS.pad.Pkcs7
-                });
+                var decrypted = CryptoJS.AES.decrypt(
+                    { ciphertext: ciphertext },
+                    AES_KEY,
+                    { iv: iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+                );
                 return decrypted.toString(CryptoJS.enc.Utf8);
-            } catch(e) {
+            } catch (e) {
+                console.error("Şifre çözme hatası:", e);
                 return null;
             }
         }
 
-        // --- C# Tarafına Gidecek Veriyi Şifreleyen Fonksiyon ---
         function encryptData(text) {
             const iv = CryptoJS.lib.WordArray.random(16);
             const encrypted = CryptoJS.AES.encrypt(text, AES_KEY, {
@@ -267,8 +281,12 @@
 
         async function fetchDefinitions() {
             try {
+                // Name ve CurrencyCode sütunları yok, onun yerine C#'tan yazılan EncryptedJson'u çekiyoruz
                 const res = await runTursoQuery(`SELECT Type, DataId, EncryptedJson FROM Def_${tenantHash}`);
-                if (!res.results || !res.results[0].response.result) throw new Error("Geçersiz hash.");
+                
+                if (!res.results || !res.results[0].response.result) {
+                    throw new Error("Geçersiz hash veya tablo yok.");
+                }
                 
                 const rows = res.results[0].response.result.rows;
                 
@@ -281,33 +299,34 @@
                 cariSel.innerHTML = '<option value="">Cari Yok</option>';
 
                 allCategories = [];
+                allSafes = [];
 
                 rows.forEach(r => {
                     const type = r[0].value;
                     const id = r[1].value;
-                    const encJson = r[2].value;
+                    const encryptedJson = r[2].value;
 
-                    // Şifreyi Çöz ve JSON'a çevir
-                    const jsonStr = decryptData(encJson);
-                    if(!jsonStr) return;
-                    
-                    const data = JSON.parse(jsonStr);
+                    // Şifreyi çözüp JSON objesine dönüştürüyoruz
+                    const decryptedStr = decryptData(encryptedJson);
+                    if (!decryptedStr) return; // Çözülemezse atla
+
+                    const dataObj = JSON.parse(decryptedStr);
+                    const name = dataObj.Name;
+                    const curr = dataObj.CurrencyCode || '';
 
                     if(type === 'SAFE') {
-                        // Kasa Gösterimi: TRY - TL Kasası
-                        safeSel.innerHTML += `<option value="${id}" data-curr="${data.CurrencyCode}">${data.CurrencyCode} - ${data.Name}</option>`;
-                    } 
-                    else if(type.startsWith('CAT_')) {
-                        allCategories.push({id: id, name: data.Name, type: type.replace('CAT_','')});
-                    } 
-                    else if(type === 'CARI') {
-                        // Cari Gösterimi: USD - C-001 - Müşteri Adı
-                        cariSel.innerHTML += `<option value="${id}">${data.CurrencyCode} - ${data.Code} - ${data.Name}</option>`;
+                        allSafes.push({id, name, curr});
+                        safeSel.innerHTML += `<option value="${id}" data-curr="${curr}">${name} (${curr})</option>`;
+                    } else if(type.startsWith('CAT_')) {
+                        allCategories.push({id, name, type: type.replace('CAT_','')});
+                    } else if(type === 'CARI') {
+                        cariSel.innerHTML += `<option value="${id}">${name}</option>`;
                     }
                 });
                 filterCategories();
             } catch (error) {
-                Swal.fire('Bağlantı Hatası', 'Veriler alınamadı. Lütfen eşleşmeyi silip tekrar QR okutun.', 'error');
+                console.error(error);
+                Swal.fire('Bağlantı Hatası', 'Bulut ile bağlantı kurulamadı veya eşleştirme kodu hatalı. Masaüstü uygulamasında Mobil Onay kısmından "Yenile / Senkronize Et" butonuna basıp ardından eşleşmeyi yenileyin.', 'error');
             }
         }
 
@@ -317,7 +336,6 @@
             catSel.innerHTML = '<option value="">Seçiniz</option>';
             
             allCategories.forEach(c => {
-                // Seçilen Tür (Gelir/Gider) VEYA 'CARI' tipli kategoriler listelenir
                 if(c.type === selectedType || c.type === 'CARI') {
                     catSel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
                 }
